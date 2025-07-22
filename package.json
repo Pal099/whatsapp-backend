@@ -1,0 +1,19 @@
+{
+  "name": "whatsapp-backend",
+  "version": "1.0.0",
+  "description": "Backend para conectar WhatsApp con frontend CRM",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "qrcode": "^1.5.1",
+    "socket.io": "^4.7.2",
+    "cors": "^2.8.5",
+    "whatsapp-web.js": "^1.22.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
