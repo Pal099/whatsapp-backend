@@ -1,5 +1,5 @@
 const express = require('express');
-const { Client, LocalAuth } = require('whatsapp-web.js'); // ← esta sola vez
+const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 const cors = require('cors');
 const http = require('http');
@@ -8,7 +8,7 @@ const { Server } = require('socket.io');
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: "http://localhost:3000", methods: ["GET", "POST"] }
+  cors: { origin: "*", methods: ["GET", "POST"] }  // Para que cualquier cliente pueda conectarse
 });
 
 app.use(cors());
@@ -17,7 +17,10 @@ let isAuthenticated = false;
 
 const client = new Client({
   authStrategy: new LocalAuth(),
-  puppeteer: { headless: true, args: ['--no-sandbox'] }
+  puppeteer: {
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox']
+  }
 });
 
 client.on('qr', async (qr) => {
@@ -32,7 +35,7 @@ client.on('authenticated', () => {
 });
 
 client.on('ready', () => {
-  console.log('WhatsApp está listo!');
+  console.log('✅ WhatsApp está listo!');
 });
 
 client.on('message', async (msg) => {
@@ -45,14 +48,18 @@ client.on('message', async (msg) => {
   });
 });
 
-
 client.on('disconnected', () => {
   isAuthenticated = false;
   io.emit('estado', 'desconectado');
 });
 
+// Ruta para evitar el error "Cannot GET /"
+app.get('/', (req, res) => {
+  res.send('✅ Servidor WhatsApp funcionando desde Render');
+});
+
 io.on('connection', (socket) => {
-  console.log('Cliente frontend conectado');
+  console.log('🔌 Cliente frontend conectado');
 
   if (isAuthenticated) {
     socket.emit('estado', 'autenticado');
@@ -64,6 +71,8 @@ io.on('connection', (socket) => {
 });
 
 client.initialize();
-server.listen(3001, () => {
-  console.log('Servidor WhatsApp corriendo en http://localhost:3001');
+
+const PORT = process.env.PORT || 3001;
+server.listen(PORT, () => {
+  console.log(`🚀 Servidor WhatsApp corriendo en http://localhost:${PORT}`);
 });
