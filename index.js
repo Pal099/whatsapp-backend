@@ -21,7 +21,7 @@ let client;
 let currentQR = null;
 let isAuthenticated = false;
 
-function createClient() {
+async function createClient() {
   client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
@@ -64,7 +64,11 @@ function createClient() {
     io.emit('estado', 'desconectado');
   });
 
-  client.initialize();
+  try {
+    await client.initialize();
+  } catch (e) {
+    console.error('❌ Error al inicializar cliente:', e.message);
+  }
 }
 
 createClient();
@@ -85,19 +89,22 @@ io.on('connection', (socket) => {
       console.log('🔒 Cerrando sesión de WhatsApp...');
 
       await client.destroy();
+
       await new Promise(resolve => setTimeout(resolve, 2000));
 
-      const authPath = path.join(__dirname, '.wwebjs_auth');
-      if (fs.existsSync(authPath)) {
-        fs.rmSync(authPath, { recursive: true, force: true });
+      const authDir = path.join(__dirname, '.wwebjs_auth');
+      if (fs.existsSync(authDir)) {
+        fs.rmSync(authDir, { recursive: true, force: true });
         console.log('🧹 Credenciales eliminadas');
       }
 
       currentQR = null;
       isAuthenticated = false;
       io.emit('estado', 'desconectado');
+      io.emit('limpiar_mensajes');
 
-      console.log('⏳ Reiniciando cliente en 2 segundos...');
+      console.log('✅ Sesión cerrada. Reiniciando cliente...');
+
       setTimeout(() => {
         createClient();
       }, 2000);
