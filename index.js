@@ -5,23 +5,23 @@ const qrcode = require('qrcode');
 const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: "*", methods: ["GET", "POST"] },
+  cors: { origin: '*', methods: ['GET', 'POST'] },
   transports: ['websocket']
 });
 
 app.use(cors());
 
+let client;
 let currentQR = null;
 let isAuthenticated = false;
-let client;
-let qrTimeout = null;
-let clienteActivo = false;
 
-function crearCliente() {
+function createClient() {
   client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
@@ -31,27 +31,16 @@ function crearCliente() {
     }
   });
 
-  clienteActivo = true;
-
   client.on('qr', async (qr) => {
     console.log('⚠️ Se generó un nuevo código QR');
     currentQR = await qrcode.toDataURL(qr);
     isAuthenticated = false;
     io.emit('qr', currentQR);
-
-    if (qrTimeout) clearTimeout(qrTimeout);
-    qrTimeout = setTimeout(async () => {
-      if (!isAuthenticated && clienteActivo) {
-        console.log('⏱ QR expirado. Reiniciando cliente...');
-        await reiniciarCliente();
-      }
-    }, 60000);
   });
 
   client.on('authenticated', () => {
     console.log('✅ Cliente autenticado');
     isAuthenticated = true;
-    if (qrTimeout) clearTimeout(qrTimeout);
     io.emit('estado', 'autenticado');
   });
 
@@ -72,32 +61,13 @@ function crearCliente() {
   client.on('disconnected', () => {
     console.log('🔌 Cliente desconectado');
     isAuthenticated = false;
-    clienteActivo = false;
     io.emit('estado', 'desconectado');
   });
 
   client.initialize();
 }
 
-async function reiniciarCliente() {
-  try {
-    if (clienteActivo && client) {
-      await client.destroy();
-      clienteActivo = false;
-      await new Promise(resolve => setTimeout(resolve, 2000));
-    }
-
-    console.log('♻️ Reiniciando cliente...');
-    crearCliente();
-
-  } catch (err) {
-    console.error('❌ Error al reiniciar cliente:', err);
-  }
-}
-
-app.get('/', (req, res) => {
-  res.send('✅ Servidor WhatsApp funcionando desde Render');
-});
+createClient();
 
 io.on('connection', (socket) => {
   console.log('🔌 Cliente frontend conectado');
@@ -112,23 +82,36 @@ io.on('connection', (socket) => {
 
   socket.on('cerrar_sesion', async () => {
     try {
-      console.log('🔒 Cerrando sesión...');
+      console.log('🔒 Cerrando sesión de WhatsApp...');
 
-      await client.logout();
       await client.destroy();
-      clienteActivo = false;
+
+      // Esperar para asegurar cierre de Puppeteer
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
+      // Borrar credenciales locales
+      const authDir = path.join(__dirname, '.wwebjs_auth');
+      if (fs.existsSync(authDir)) {
+        fs.rmSync(authDir, { recursive: true, force: true });
+        console.log('🧹 Credenciales eliminadas');
+      }
+
       currentQR = null;
       isAuthenticated = false;
       io.emit('estado', 'desconectado');
 
-      setTimeout(() => crearCliente(), 1500);
+      console.log('✅ Sesión cerrada. Reiniciando cliente...');
+      createClient();
     } catch (error) {
       console.error('❌ Error al cerrar sesión:', error);
+      io.emit('error', 'Error al cerrar sesión');
     }
   });
 });
 
-crearCliente();
+app.get('/', (req, res) => {
+  res.send('✅ Servidor WhatsApp funcionando');
+});
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
