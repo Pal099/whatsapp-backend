@@ -81,31 +81,32 @@ io.on('connection', (socket) => {
   }
 
   socket.on('cerrar_sesion', async () => {
-  try {
-    console.log('🔒 Cerrando sesión de WhatsApp...');
+    try {
+      console.log('🔒 Cerrando sesión de WhatsApp...');
 
-    await client.logout(); // desvincula
-    await client.destroy(); // cierra Puppeteer
+      await client.destroy();
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
-    // Borrar carpeta exacta
-    const authDir = path.join(__dirname, '.wwebjs_auth', 'session-default');
-    if (fs.existsSync(authDir)) {
-      fs.rmSync(authDir, { recursive: true, force: true });
-      console.log('🧹 Credenciales eliminadas');
+      const authPath = path.join(__dirname, '.wwebjs_auth');
+      if (fs.existsSync(authPath)) {
+        fs.rmSync(authPath, { recursive: true, force: true });
+        console.log('🧹 Credenciales eliminadas');
+      }
+
+      currentQR = null;
+      isAuthenticated = false;
+      io.emit('estado', 'desconectado');
+
+      console.log('⏳ Reiniciando cliente en 2 segundos...');
+      setTimeout(() => {
+        createClient();
+      }, 2000);
+
+    } catch (error) {
+      console.error('❌ Error al cerrar sesión:', error);
+      io.emit('error', 'Error al cerrar sesión');
     }
-
-    currentQR = null;
-    isAuthenticated = false;
-    io.emit('estado', 'desconectado');
-
-    console.log('✅ Sesión cerrada. Reiniciando cliente...');
-    createClient();
-  } catch (error) {
-    console.error('❌ Error al cerrar sesión:', error);
-    io.emit('error', 'Error al cerrar sesión');
-  }
-});
-
+  });
 });
 
 app.get('/', (req, res) => {
