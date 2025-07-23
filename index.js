@@ -9,11 +9,11 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: "*", methods: ["GET", "POST"] },
-  transports: ['websocket']  // <--- Forzamos WebSocket
+  transports: ['websocket']
 });
 
-
 app.use(cors());
+
 let currentQR = null;
 let isAuthenticated = false;
 
@@ -26,18 +26,20 @@ const client = new Client({
 });
 
 client.on('qr', async (qr) => {
+  console.log('⚠️ Se generó un nuevo código QR');
   currentQR = await qrcode.toDataURL(qr);
   isAuthenticated = false;
   io.emit('qr', currentQR);
 });
 
 client.on('authenticated', () => {
+  console.log('✅ Cliente autenticado');
   isAuthenticated = true;
   io.emit('estado', 'autenticado');
 });
 
 client.on('ready', () => {
-  console.log('✅ WhatsApp está listo!');
+  console.log('✅ WhatsApp está listo');
 });
 
 client.on('message', async (msg) => {
@@ -51,20 +53,12 @@ client.on('message', async (msg) => {
 });
 
 client.on('disconnected', () => {
+  console.log('🔌 Cliente desconectado');
   isAuthenticated = false;
   io.emit('estado', 'desconectado');
 });
-client.on('qr', async (qr) => {
-  console.log('⚠️ Se generó un QR nuevo');
-  currentQR = await qrcode.toDataURL(qr);
-  isAuthenticated = false;
-  io.emit('qr', currentQR);
-});
-client.on('authenticated', () => {
-  console.log('✅ Cliente autenticado con éxito');
-});
 
-// Ruta para evitar el error "Cannot GET /"
+// Ruta para evitar "Cannot GET /"
 app.get('/', (req, res) => {
   res.send('✅ Servidor WhatsApp funcionando desde Render');
 });
