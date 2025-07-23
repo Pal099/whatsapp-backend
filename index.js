@@ -17,54 +17,88 @@ app.use(cors());
 
 let currentQR = null;
 let isAuthenticated = false;
+let client;
+let qrTimeout = null;
+let clienteActivo = false;
 
-const client = new Client({
-  authStrategy: new LocalAuth(),
-  puppeteer: {
-    headless: true,
-    executablePath: executablePath(),
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  }
-});
-
-client.on('qr', async (qr) => {
-  console.log('⚠️ Se generó un nuevo código QR');
-  currentQR = await qrcode.toDataURL(qr);
-  isAuthenticated = false;
-  io.emit('qr', currentQR);
-});
-
-client.on('authenticated', () => {
-  console.log('✅ Cliente autenticado');
-  isAuthenticated = true;
-  io.emit('estado', 'autenticado');
-});
-
-client.on('ready', () => {
-  console.log('✅ WhatsApp está listo');
-});
-
-client.on('message', async (msg) => {
-  const contacto = await msg.getContact();
-  io.emit('nuevo_mensaje', {
-    id: msg.id._serialized,
-    nombre: contacto.pushname || contacto.name || contacto.number,
-    numero: contacto.number,
-    mensaje: msg.body
+function crearCliente() {
+  client = new Client({
+    authStrategy: new LocalAuth(),
+    puppeteer: {
+      headless: true,
+      executablePath: executablePath(),
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    }
   });
-});
 
-client.on('disconnected', () => {
-  console.log('🔌 Cliente desconectado');
-  isAuthenticated = false;
-  io.emit('estado', 'desconectado');
-});
+  clienteActivo = true;
+
+  client.on('qr', async (qr) => {
+    console.log('⚠️ Se generó un nuevo código QR');
+    currentQR = await qrcode.toDataURL(qr);
+    isAuthenticated = false;
+    io.emit('qr', currentQR);
+
+    if (qrTimeout) clearTimeout(qrTimeout);
+    qrTimeout = setTimeout(async () => {
+      if (!isAuthenticated && clienteActivo) {
+        console.log('⏱ QR expirado. Reiniciando cliente...');
+        await reiniciarCliente();
+      }
+    }, 60000);
+  });
+
+  client.on('authenticated', () => {
+    console.log('✅ Cliente autenticado');
+    isAuthenticated = true;
+    if (qrTimeout) clearTimeout(qrTimeout);
+    io.emit('estado', 'autenticado');
+  });
+
+  client.on('ready', () => {
+    console.log('✅ WhatsApp está listo');
+  });
+
+  client.on('message', async (msg) => {
+    const contacto = await msg.getContact();
+    io.emit('nuevo_mensaje', {
+      id: msg.id._serialized,
+      nombre: contacto.pushname || contacto.name || contacto.number,
+      numero: contacto.number,
+      mensaje: msg.body
+    });
+  });
+
+  client.on('disconnected', () => {
+    console.log('🔌 Cliente desconectado');
+    isAuthenticated = false;
+    clienteActivo = false;
+    io.emit('estado', 'desconectado');
+  });
+
+  client.initialize();
+}
+
+async function reiniciarCliente() {
+  try {
+    if (clienteActivo && client) {
+      await client.destroy();
+      clienteActivo = false;
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+
+    console.log('♻️ Reiniciando cliente...');
+    crearCliente();
+
+  } catch (err) {
+    console.error('❌ Error al reiniciar cliente:', err);
+  }
+}
 
 app.get('/', (req, res) => {
   res.send('✅ Servidor WhatsApp funcionando desde Render');
 });
 
-// ✅ EVENTOS DE SOCKET
 io.on('connection', (socket) => {
   console.log('🔌 Cliente frontend conectado');
 
@@ -76,33 +110,25 @@ io.on('connection', (socket) => {
     socket.emit('estado', 'generando');
   }
 
-  // ✅ CERRAR SESIÓN
   socket.on('cerrar_sesion', async () => {
-  try {
-    console.log('🔒 Cerrando sesión de WhatsApp...');
+    try {
+      console.log('🔒 Cerrando sesión...');
 
-    await client.destroy(); // 1. Cerramos Puppeteer
-    await new Promise(resolve => setTimeout(resolve, 1000)); // 2. Esperamos
-    await client.logout(); // 3. Cerramos la sesión
+      await client.logout();
+      await client.destroy();
+      clienteActivo = false;
+      currentQR = null;
+      isAuthenticated = false;
+      io.emit('estado', 'desconectado');
 
-    // 4. Actualizamos el estado y notificamos al frontend
-    currentQR = null;
-    isAuthenticated = false;
-    io.emit('estado', 'desconectado');
-
-    console.log('✅ Sesión cerrada. Reiniciando cliente...');
-
-    // 5. Reiniciamos el cliente para que vuelva a generar un nuevo QR
-    client.initialize();
-
-  } catch (error) {
-    console.error('❌ Error al cerrar sesión:', error);
-  }
+      setTimeout(() => crearCliente(), 1500);
+    } catch (error) {
+      console.error('❌ Error al cerrar sesión:', error);
+    }
+  });
 });
 
-});
-
-client.initialize();
+crearCliente();
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
