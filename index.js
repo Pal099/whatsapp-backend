@@ -54,6 +54,15 @@ client.on('disconnected', () => {
   isAuthenticated = false;
   io.emit('estado', 'desconectado');
 });
+client.on('qr', async (qr) => {
+  console.log('⚠️ Se generó un QR nuevo');
+  currentQR = await qrcode.toDataURL(qr);
+  isAuthenticated = false;
+  io.emit('qr', currentQR);
+});
+client.on('authenticated', () => {
+  console.log('✅ Cliente autenticado con éxito');
+});
 
 // Ruta para evitar el error "Cannot GET /"
 app.get('/', (req, res) => {
