@@ -78,16 +78,28 @@ io.on('connection', (socket) => {
 
   // ✅ CERRAR SESIÓN
   socket.on('cerrar_sesion', async () => {
-    try {
-      await client.logout();
-      currentQR = null;
-      isAuthenticated = false;
-      io.emit('estado', 'desconectado');
-      console.log('🔒 Sesión de WhatsApp cerrada');
-    } catch (error) {
-      console.error('❌ Error al cerrar sesión:', error);
-    }
-  });
+  try {
+    console.log('🔒 Cerrando sesión de WhatsApp...');
+
+    await client.destroy(); // 1. Cerramos Puppeteer
+    await new Promise(resolve => setTimeout(resolve, 1000)); // 2. Esperamos
+    await client.logout(); // 3. Cerramos la sesión
+
+    // 4. Actualizamos el estado y notificamos al frontend
+    currentQR = null;
+    isAuthenticated = false;
+    io.emit('estado', 'desconectado');
+
+    console.log('✅ Sesión cerrada. Reiniciando cliente...');
+
+    // 5. Reiniciamos el cliente para que vuelva a generar un nuevo QR
+    client.initialize();
+
+  } catch (error) {
+    console.error('❌ Error al cerrar sesión:', error);
+  }
+});
+
 });
 
 client.initialize();
