@@ -1,6 +1,6 @@
 const express = require('express');
 const { Client, LocalAuth } = require('whatsapp-web.js');
-const { executablePath } = require('puppeteer'); // agregá esto
+const { executablePath } = require('puppeteer');
 const qrcode = require('qrcode');
 const cors = require('cors');
 const http = require('http');
@@ -60,11 +60,11 @@ client.on('disconnected', () => {
   io.emit('estado', 'desconectado');
 });
 
-// Ruta para evitar "Cannot GET /"
 app.get('/', (req, res) => {
   res.send('✅ Servidor WhatsApp funcionando desde Render');
 });
 
+// ✅ EVENTOS DE SOCKET
 io.on('connection', (socket) => {
   console.log('🔌 Cliente frontend conectado');
 
@@ -75,6 +75,19 @@ io.on('connection', (socket) => {
   } else {
     socket.emit('estado', 'generando');
   }
+
+  // ✅ CERRAR SESIÓN
+  socket.on('cerrar_sesion', async () => {
+    try {
+      await client.logout();
+      currentQR = null;
+      isAuthenticated = false;
+      io.emit('estado', 'desconectado');
+      console.log('🔒 Sesión de WhatsApp cerrada');
+    } catch (error) {
+      console.error('❌ Error al cerrar sesión:', error);
+    }
+  });
 });
 
 client.initialize();
