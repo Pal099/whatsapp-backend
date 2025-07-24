@@ -1,126 +1,63 @@
 const express = require('express');
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const { executablePath } = require('puppeteer');
-const qrcode = require('qrcode');
-const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
-const fs = require('fs');
-const path = require('path');
+const { Client, LocalAuth } = require('whatsapp-web.js');
+const qrcode = require('qrcode');
+const cors = require('cors');
 
 const app = express();
 const server = http.createServer(app);
+
+// Permitir CORS para cualquier origen (puedes restringir en producción)
+const corsOptions = {
+  origin: '*',
+  methods: ['GET', 'POST'],
+  credentials: true
+};
+
+app.use(cors(corsOptions));
+
 const io = new Server(server, {
-  cors: { origin: '*', methods: ['GET', 'POST'] },
-  transports: ['websocket']
+  cors: corsOptions
 });
 
-app.use(cors());
-
-let client;
-let currentQR = null;
-let isAuthenticated = false;
-
-async function createClient() {
-  client = new Client({
-    authStrategy: new LocalAuth(),
-    puppeteer: {
-      headless: true,
-      executablePath: executablePath(),
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    }
-  });
-
-  client.on('qr', async (qr) => {
-    console.log('⚠️ Se generó un nuevo código QR');
-    currentQR = await qrcode.toDataURL(qr);
-    isAuthenticated = false;
-    io.emit('qr', currentQR);
-  });
-
-  client.on('authenticated', () => {
-    console.log('✅ Cliente autenticado');
-    isAuthenticated = true;
-    io.emit('estado', 'autenticado');
-  });
-
-  client.on('ready', () => {
-    console.log('✅ WhatsApp está listo');
-  });
-
-  client.on('message', async (msg) => {
-    const contacto = await msg.getContact();
-    io.emit('nuevo_mensaje', {
-      id: msg.id._serialized,
-      nombre: contacto.pushname || contacto.name || contacto.number,
-      numero: contacto.number,
-      mensaje: msg.body
-    });
-  });
-
-  client.on('disconnected', () => {
-    console.log('🔌 Cliente desconectado');
-    isAuthenticated = false;
-    io.emit('estado', 'desconectado');
-  });
-
-  try {
-    await client.initialize();
-  } catch (e) {
-    console.error('❌ Error al inicializar cliente:', e.message);
+const client = new Client({
+  authStrategy: new LocalAuth(),
+  puppeteer: {
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox']
   }
-}
+});
 
-createClient();
+client.on('qr', async (qr) => {
+  console.log('⚠️ Se generó un nuevo código QR');
+  const qrCodeDataURL = await qrcode.toDataURL(qr);
+  io.emit('qr', qrCodeDataURL);
+  io.emit('estado', 'esperando');
+});
+
+client.on('ready', () => {
+  console.log('✅ Cliente de WhatsApp listo');
+  io.emit('estado', 'autenticado');
+});
+
+client.on('disconnected', () => {
+  console.log('❌ Cliente desconectado');
+  io.emit('estado', 'desconectado');
+});
 
 io.on('connection', (socket) => {
   console.log('🔌 Cliente frontend conectado');
 
-  if (isAuthenticated) {
-    socket.emit('estado', 'autenticado');
-  } else if (currentQR) {
-    socket.emit('qr', currentQR);
-  } else {
-    socket.emit('estado', 'generando');
-  }
-
   socket.on('cerrar_sesion', async () => {
-    try {
-      console.log('🔒 Cerrando sesión de WhatsApp...');
-
-      await client.destroy();
-
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      const authDir = path.join(__dirname, '.wwebjs_auth');
-      if (fs.existsSync(authDir)) {
-        fs.rmSync(authDir, { recursive: true, force: true });
-        console.log('🧹 Credenciales eliminadas');
-      }
-
-      currentQR = null;
-      isAuthenticated = false;
-      io.emit('estado', 'desconectado');
-      io.emit('limpiar_mensajes');
-
-      console.log('✅ Sesión cerrada. Reiniciando cliente...');
-
-      setTimeout(() => {
-        createClient();
-      }, 2000);
-
-    } catch (error) {
-      console.error('❌ Error al cerrar sesión:', error);
-      io.emit('error', 'Error al cerrar sesión');
-    }
+    await client.logout();
+    io.emit('estado', 'desconectado');
   });
 });
 
-app.get('/', (req, res) => {
-  res.send('✅ Servidor WhatsApp funcionando');
-});
+// Inicializar cliente de WhatsApp
+client.initialize();
 
-const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
-  console.log(`🚀 Servidor WhatsApp corriendo en http://localhost:${PORT}`);
+server.listen(3001, () => {
+  console.log('🚀 Servidor WhatsApp corriendo en http://localhost:3001');
 });
