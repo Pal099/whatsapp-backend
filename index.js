@@ -1,63 +1,71 @@
 const express = require('express');
 const http = require('http');
-const { Server } = require('socket.io');
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode');
 const cors = require('cors');
+const { Server } = require('socket.io');
+const { loadData, saveData } = require('./utils/storage');
+const createWhatsAppClient = require('./whatsapp/client');
 
 const app = express();
-const server = http.createServer(app);
+app.use(cors());
+app.use(express.json());
 
-// Permitir CORS para cualquier origen (puedes restringir en producción)
-const corsOptions = {
-  origin: '*',
-  methods: ['GET', 'POST'],
-  credentials: true
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: { origin: '*', methods: ['GET', 'POST'] }
+});
+
+let dataStore = {
+  mensajes: [],
+  notas: {},
+  etiquetas: {},
+  respuestas: {},
+  save: async () => await saveData(dataStore)
 };
 
-app.use(cors(corsOptions));
+(async () => {
+  const data = await loadData();
+  Object.assign(dataStore, data);
+})();
 
-const io = new Server(server, {
-  cors: corsOptions
-});
+const client = createWhatsAppClient(io, dataStore);
 
-const client = new Client({
-  authStrategy: new LocalAuth(),
-  puppeteer: {
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  }
-});
+io.on('connection', socket => {
+  console.log('🟢 Frontend conectado');
 
-client.on('qr', async (qr) => {
-  console.log('⚠️ Se generó un nuevo código QR');
-  const qrCodeDataURL = await qrcode.toDataURL(qr);
-  io.emit('qr', qrCodeDataURL);
-  io.emit('estado', 'esperando');
-});
+  socket.emit('estado', client.info?.wid ? 'autenticado' : 'desconectado');
+  socket.emit('mensajes_iniciales', dataStore.mensajes);
+  socket.emit('notas', dataStore.notas);
+  socket.emit('etiquetas', dataStore.etiquetas);
+  socket.emit('respuestas', dataStore.respuestas);
 
-client.on('ready', () => {
-  console.log('✅ Cliente de WhatsApp listo');
-  io.emit('estado', 'autenticado');
-});
+  socket.on('guardar_nota', async ({ numero, nota }) => {
+    dataStore.notas[numero] = nota;
+    await dataStore.save();
+    io.emit('notas', dataStore.notas);
+  });
 
-client.on('disconnected', () => {
-  console.log('❌ Cliente desconectado');
-  io.emit('estado', 'desconectado');
-});
+  socket.on('guardar_etiqueta', async ({ numero, etiqueta }) => {
+    if (!dataStore.etiquetas[numero]) dataStore.etiquetas[numero] = [];
+    if (!dataStore.etiquetas[numero].includes(etiqueta)) {
+      dataStore.etiquetas[numero].push(etiqueta);
+      await dataStore.save();
+      io.emit('etiquetas', dataStore.etiquetas);
+    }
+  });
 
-io.on('connection', (socket) => {
-  console.log('🔌 Cliente frontend conectado');
+  socket.on('agregar_respuesta_rapida', async ({ alias, mensaje }) => {
+    dataStore.respuestas[alias] = mensaje;
+    await dataStore.save();
+    io.emit('respuestas', dataStore.respuestas);
+  });
 
   socket.on('cerrar_sesion', async () => {
-    await client.logout();
+    await client.destroy();
     io.emit('estado', 'desconectado');
   });
 });
 
-// Inicializar cliente de WhatsApp
-client.initialize();
+app.get('/', (req, res) => res.send('Servidor CRM WhatsApp en ejecución'));
 
-server.listen(3001, () => {
-  console.log('🚀 Servidor WhatsApp corriendo en http://localhost:3001');
-});
+const PORT = process.env.PORT || 3001;
+server.listen(PORT, () => console.log(`🚀 Backend corriendo en http://localhost:${PORT}`));
